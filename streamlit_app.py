@@ -23,14 +23,11 @@ if "historical_rules" not in st.session_state:
 if "simulated_results" not in st.session_state:
     st.session_state.simulated_results = None
 
-
 # --- UTILITIES ---
 def clean_number(value: str) -> float:
     clean_val = re.sub(r"[^\d.-]", "", str(value))
-    try:
-        return float(clean_val) if clean_val else 0.0
-    except ValueError:
-        return 0.0
+    try: return float(clean_val) if clean_val else 0.0
+    except ValueError: return 0.0
 
 def normalize_store_id(store: str) -> str:
     s = str(store).strip()
@@ -43,9 +40,10 @@ def get_next_ol_name(store_name: str) -> str:
     return f"ol{first_store}"
 
 def format_display_store_name(comps: list, trailer_restr: str, allow_banana: bool = True) -> str:
+    if not comps: return ""
     raw_names = []
     for c in comps:
-        name = c["raw_id"]
+        name = c.get("raw_id", "")
         clean_n = re.sub(r"\s*\|\s*bananas?", "", name, flags=re.IGNORECASE).strip()
         if clean_n and clean_n not in raw_names:
             raw_names.append(clean_n)
@@ -53,32 +51,24 @@ def format_display_store_name(comps: list, trailer_restr: str, allow_banana: boo
         "banana" in str(trailer_restr).lower()
         or any("banana" in str(c.get("trailer", "")).lower() for c in comps)
     )
-    if is_banana:
-        return " | ".join(raw_names + ["Bananas"])
-    else:
-        return " | ".join(raw_names)
+    if is_banana: return " | ".join(raw_names + ["Bananas"])
+    return " | ".join(raw_names)
 
 def parse_config_file(config_content: str, commodity: str = "grocery") -> dict:
     comm_key = commodity.lower().strip()
     allow_banana = comm_key == "grocery"
 
-    config_data = {
-        "cubes": {"pup": 900.0, "48'": 1600.0, "53'": 2000.0},
-        "max_weight": 44000.0,
-    }
+    config_data = {"cubes": {"pup": 900.0, "48'": 1600.0, "53'": 2000.0}, "max_weight": 44000.0}
     if allow_banana:
         config_data["cubes"]["banana"] = 1250.0
         config_data["cubes"]["bananas"] = 1250.0
 
-    if not config_content:
-        return config_data
+    if not config_content: return config_data
 
     current_section = None
     for line in config_content.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-
+        if not line or line.startswith("#"): continue
         section_match = re.match(r"^([\w' ]+):$", line)
         if section_match:
             current_section = section_match.group(1).strip().lower()
@@ -88,20 +78,15 @@ def parse_config_file(config_content: str, commodity: str = "grocery") -> dict:
         if sub_match:
             key = sub_match.group(1).strip().lower()
             val = clean_number(sub_match.group(2))
-
             if current_section == "max weight" or "weight" in key:
                 if comm_key in key or current_section == "max weight":
                     config_data["max_weight"] = val
             elif current_section:
-                if current_section in ["banana", "bananas"] and not allow_banana:
-                    continue
+                if current_section in ["banana", "bananas"] and not allow_banana: continue
                 if comm_key in key or ("grocer" in comm_key and "grocer" in key):
                     config_data["cubes"][current_section] = val
-                    if current_section == "banana":
-                        config_data["cubes"]["bananas"] = val
-                    elif current_section == "bananas":
-                        config_data["cubes"]["banana"] = val
-
+                    if current_section == "banana": config_data["cubes"]["bananas"] = val
+                    elif current_section == "bananas": config_data["cubes"]["banana"] = val
     return config_data
 
 def load_historical_combos(content: str) -> list:
@@ -111,28 +96,20 @@ def load_historical_combos(content: str) -> list:
         line = line.strip()
         if not line or line.startswith("#"): continue
         tokens = [t.strip() for t in re.split(r"[|,+/;\t]+|\s{2,}", line) if t.strip()]
-        if len(tokens) == 1:
-            tokens = line.split()
+        if len(tokens) == 1: tokens = line.split()
         norm_tokens = [normalize_store_id(t) for t in tokens if normalize_store_id(t)]
-        if len(norm_tokens) >= 2:
-            combos.append(norm_tokens)
+        if len(norm_tokens) >= 2: combos.append(norm_tokens)
     return combos
 
 def get_trailer_limits(trailer_str: str, config: dict, allow_banana: bool = True) -> tuple:
     tokens = [t.strip().lower() for t in re.split(r"[|/]+", trailer_str) if t.strip()]
-    if not tokens:
-        tokens = ["53'"]
-
+    if not tokens: tokens = ["53'"]
     cube_limits = []
     for t in tokens:
-        if "pup" in t:
-            cube_limits.append(config["cubes"].get("pup", 900.0))
-        elif "banana" in t and allow_banana:
-            cube_limits.append(config["cubes"].get("banana", 1250.0))
-        elif "48" in t:
-            cube_limits.append(config["cubes"].get("48'", 1600.0))
-        elif "53" in t:
-            cube_limits.append(config["cubes"].get("53'", 2000.0))
+        if "pup" in t: cube_limits.append(config["cubes"].get("pup", 900.0))
+        elif "banana" in t and allow_banana: cube_limits.append(config["cubes"].get("banana", 1250.0))
+        elif "48" in t: cube_limits.append(config["cubes"].get("48'", 1600.0))
+        elif "53" in t: cube_limits.append(config["cubes"].get("53'", 2000.0))
         else:
             matched = False
             for k, v in config["cubes"].items():
@@ -140,33 +117,23 @@ def get_trailer_limits(trailer_str: str, config: dict, allow_banana: bool = True
                     cube_limits.append(v)
                     matched = True
                     break
-            if not matched:
-                cube_limits.append(config["cubes"].get("53'", 2000.0))
-
+            if not matched: cube_limits.append(config["cubes"].get("53'", 2000.0))
     max_cube = min(cube_limits) if cube_limits else config["cubes"].get("53'", 2000.0)
     max_weight = config.get("max_weight", 44000.0)
     return max_cube, max_weight
 
-
 # --- ROUTING ENGINE ---
-def solve_optimal_bins_aggressive(
-    stores_list: list, max_c: float, max_w: float, historical_rules: list,
-    commodity: str = "grocery", strategy: str = "Aggressive", random_seed: int = None
-) -> list:
+def solve_optimal_bins_aggressive(stores_list: list, max_c: float, max_w: float, historical_rules: list, commodity: str = "grocery", strategy: str = "Aggressive", random_seed: int = None) -> list:
     if not stores_list: return []
     rng = random.Random(random_seed) if random_seed is not None else random.Random()
-
     comm_lower = commodity.lower()
     allow_aggressive_overload = comm_lower in ["grocery", "perishable"]
     is_frozen = comm_lower == "frozen"
 
-    initial_full_stores = []
-    pending_ol_pieces = []
-
+    initial_full_stores, pending_ol_pieces = [], []
     for s in stores_list:
         c_rem, w_rem = s["cubes"], s["weight"]
         curr_name = s["raw_id"]
-
         if c_rem > max_c or w_rem > max_w:
             while c_rem > max_c or w_rem > max_w:
                 ac, aw = min(c_rem, max_c), min(w_rem, max_w)
@@ -177,7 +144,6 @@ def solve_optimal_bins_aggressive(
                 c_rem -= ac
                 w_rem -= aw
                 curr_name = get_next_ol_name(curr_name)
-
             if c_rem > 0 or w_rem > 0:
                 p = dict(s)
                 p["raw_id"], p["cubes"], p["weight"], p["loads"] = curr_name, c_rem, w_rem, 1
@@ -205,31 +171,26 @@ def solve_optimal_bins_aggressive(
     direct_max_loads = [s for s in initial_full_stores if s["cubes"] >= max_c]
     for d_load in direct_max_loads:
         bins.append({
-            "bin_id": str(uuid.uuid4()),
-            "cubes": d_load["cubes"], "weight": d_load["weight"],
+            "bin_id": str(uuid.uuid4()), "cubes": d_load["cubes"], "weight": d_load["weight"],
             "stores": [d_load["raw_id"]], "pieces": [d_load],
             "pattern_type": "📦 Direct Max Load", "trailer": d_load.get("trailer", "53'")
         })
 
     active_full_pool = {s["norm_id"]: dict(s) for s in initial_full_stores if s["cubes"] < max_c}
-
     rules_to_process = list(historical_rules)
     if strategy == "Alternative": rng.shuffle(rules_to_process)
 
-    # Pass 1: Historical Fits
+    # Historical Fits
     for rule in rules_to_process:
         norm_rule = []
         for x in rule:
             nx = normalize_store_id(x)
             if nx not in norm_rule: norm_rule.append(nx)
-
         matched = [r_nid for r_nid in norm_rule if r_nid in active_full_pool and r_nid not in assigned_stores]
-
         if len(matched) >= 2:
             s_first = active_full_pool[matched[0]]
             trailing = [active_full_pool[r_nid] for r_nid in matched[1:]]
-            trailing_c = sum(s["cubes"] for s in trailing)
-            trailing_w = sum(s["weight"] for s in trailing)
+            trailing_c, trailing_w = sum(s["cubes"] for s in trailing), sum(s["weight"] for s in trailing)
             total_c, total_w = s_first["cubes"] + trailing_c, s_first["weight"] + trailing_w
 
             if total_c <= max_c and total_w <= max_w:
@@ -240,11 +201,9 @@ def solve_optimal_bins_aggressive(
                     "pattern_type": "⭐ Historical Route", "trailer": s_first.get("trailer", "53'")
                 })
                 for r_nid in matched: assigned_stores.add(r_nid)
-
             elif allow_aggressive_overload and trailing_c < max_c and trailing_w < max_w and s_first["norm_id"] not in overloaded_bases:
                 avail_c, avail_w = max_c - trailing_c, max_w - trailing_w
                 s1_ol_c = s_first["cubes"] - avail_c
-
                 potential_absorber = None
                 for other_nid, other_s in active_full_pool.items():
                     if other_nid not in assigned_stores and other_nid not in matched and other_nid != s_first["norm_id"]:
@@ -280,7 +239,6 @@ def solve_optimal_bins_aggressive(
                         "stores": [ol_name, potential_absorber["raw_id"]], "pieces": second_pieces,
                         "pattern_type": "⚡ Paired Overload Route", "trailer": s_first.get("trailer", "53'")
                     })
-
                     overloaded_bases.add(s_first["norm_id"])
                     for r_nid in matched: assigned_stores.add(r_nid)
                     assigned_stores.add(potential_absorber["norm_id"])
@@ -288,19 +246,13 @@ def solve_optimal_bins_aggressive(
     # Pass 2: Multi-OL Grouping
     for full_nid, full_s in list(active_full_pool.items()):
         if full_nid in assigned_stores or not pending_ol_pieces: continue
-        compatible_ols = [
-            ol for ol in pending_ol_pieces if ol["norm_id"] != full_nid and (
-                (ol["norm_id"], full_nid) in historical_pairs_set or affinity[ol["norm_id"]][full_nid] > 0
-            )
-        ]
+        compatible_ols = [ol for ol in pending_ol_pieces if ol["norm_id"] != full_nid and ((ol["norm_id"], full_nid) in historical_pairs_set or affinity[ol["norm_id"]][full_nid] > 0)]
         if not compatible_ols: continue
-
         for num_ols in (3, 2, 1):
             for ol_subset in combinations(compatible_ols, num_ols):
                 if len(set(o["norm_id"] for o in ol_subset)) != num_ols: continue
                 tot_ol_c = sum(o["cubes"] for o in ol_subset)
                 tot_ol_w = sum(o["weight"] for o in ol_subset)
-
                 if (tot_ol_c + full_s["cubes"] <= max_c) and (tot_ol_w + full_s["weight"] <= max_w):
                     group_pieces = [dict(o) for o in ol_subset] + [dict(full_s)]
                     bins.append({
@@ -314,11 +266,10 @@ def solve_optimal_bins_aggressive(
                     break
             if full_nid in assigned_stores: break
 
-    # Pass 3: Knapsack Packing
+    # Pass 3: Knapsack
     max_stops = 8 if is_frozen else 3
     util_threshold = 0.40 if is_frozen else 0.70
     progress = True
-
     while progress:
         progress = False
         unassigned_ids = [s_nid for s_nid in active_full_pool if s_nid not in assigned_stores]
@@ -331,17 +282,13 @@ def solve_optimal_bins_aggressive(
         for anchor_id in unassigned_ids:
             if anchor_id in assigned_stores: continue
             anchor_store = active_full_pool[anchor_id]
-            current_combo = [anchor_store]
-            current_c, current_w = anchor_store["cubes"], anchor_store["weight"]
+            current_combo, current_c, current_w = [anchor_store], anchor_store["cubes"], anchor_store["weight"]
 
             candidates = [active_full_pool[sid] for sid in unassigned_ids if sid != anchor_id and sid not in assigned_stores]
             if strategy == "Alternative":
                 rng.shuffle(candidates)
             else:
-                candidates.sort(key=lambda s: (
-                    affinity[anchor_id][s["norm_id"]] * 10 + (1 if (anchor_id, s["norm_id"]) in historical_pairs_set else 0),
-                    s["cubes"]
-                ), reverse=True)
+                candidates.sort(key=lambda s: (affinity[anchor_id][s["norm_id"]] * 10 + (1 if (anchor_id, s["norm_id"]) in historical_pairs_set else 0), s["cubes"]), reverse=True)
 
             for cand in candidates:
                 if len(current_combo) >= max_stops: break
@@ -351,11 +298,7 @@ def solve_optimal_bins_aggressive(
                     current_w += cand["weight"]
 
             if len(current_combo) >= 2 or (len(current_combo) == 1 and current_c >= max_c * 0.85):
-                aff_sum = 0
-                for i in range(len(current_combo)):
-                    for j in range(i + 1, len(current_combo)):
-                        aff_sum += affinity[current_combo[i]["norm_id"]][current_combo[j]["norm_id"]]
-
+                aff_sum = sum(affinity[current_combo[i]["norm_id"]][current_combo[j]["norm_id"]] for i in range(len(current_combo)) for j in range(i + 1, len(current_combo)))
                 fill_pct = current_c / max_c
                 if is_frozen or fill_pct >= util_threshold or aff_sum > 0:
                     score = (fill_pct * 80.0) + (aff_sum * 15.0) + (len(current_combo) * 5.0)
@@ -367,7 +310,6 @@ def solve_optimal_bins_aggressive(
             ordered_combo = sorted(best_knapsack_combo, key=lambda s: historical_order_map.get(s["norm_id"], 999))
             tot_c = sum(s["cubes"] for s in ordered_combo)
             tot_w = sum(s["weight"] for s in ordered_combo)
-
             bins.append({
                 "bin_id": str(uuid.uuid4()), "cubes": tot_c, "weight": tot_w,
                 "stores": [s["raw_id"] for s in ordered_combo], "pieces": [dict(s) for s in ordered_combo],
@@ -377,7 +319,6 @@ def solve_optimal_bins_aggressive(
             for s in ordered_combo: assigned_stores.add(s["norm_id"])
             progress = True
 
-    # Pass 4: Standalone
     for s_nid, s in active_full_pool.items():
         if s_nid not in assigned_stores:
             bins.append({
@@ -431,16 +372,12 @@ if st.sidebar.button("⚡ Load Initial Data", use_container_width=True, type="pr
             dh_val = tokens[4].strip() if len(tokens) > 4 else "0"
             
             shift = "AM"
-            if any(t.strip().upper() in ["PM", "P.M.", "NIGHT"] for t in tokens) or "PM" in raw_line.upper():
-                shift = "PM"
+            if any(t.strip().upper() in ["PM", "P.M.", "NIGHT"] for t in tokens) or "PM" in raw_line.upper(): shift = "PM"
             
             ordered_stores.append({
-                "raw_id": raw_id,
-                "norm_id": normalize_store_id(raw_id),
-                "trailer": trailer,
-                "has_curfew": has_curfew,
-                "dh": "D&H" if dh_val in ["1", "2"] else "",
-                "shift": shift
+                "raw_id": raw_id, "norm_id": normalize_store_id(raw_id),
+                "trailer": trailer, "has_curfew": has_curfew,
+                "dh": "D&H" if dh_val in ["1", "2"] else "", "shift": shift
             })
 
         # Parse Roadshow
@@ -518,7 +455,11 @@ with tab_board:
             status = b.get("pattern_type", "OK")
             if b["cubes"] > b["max_c"] or b["weight"] > b["max_w"]:
                 status = "⚠️ OVER CAPACITY"
-            disp_name = format_display_store_name(b["pieces"], b["trailer"], allow_banana)
+            
+            # Safe parsing
+            pieces = b.get("pieces", [])
+            disp_name = format_display_store_name(pieces, b.get("trailer", "53'"), allow_banana) if pieces else " | ".join(b.get("stores", []))
+            
             df_data.append({
                 "Select": False,
                 "BinID": b["bin_id"],
@@ -528,21 +469,10 @@ with tab_board:
                 "Max Cubes": b["max_c"],
                 "Weight": round(b["weight"], 1),
                 "Max Weight": b["max_w"],
-                "Trailer": b["trailer"],
+                "Trailer": b.get("trailer", "53'"),
                 "Status": status
             })
         df = pd.DataFrame(df_data)
-
-        # Control Panel
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("🔗 Combine Selected", use_container_width=True):
-                # We need to rely on the user checking boxes in the data editor, which we capture below.
-                pass # Handled after st.data_editor block using session state changes
-        with col2:
-            st.button("✂️ Uncombine", use_container_width=True, help="Feature coming soon via UI")
-        with col3:
-            st.button("🗑️ Absorb OL", use_container_width=True, help="Feature coming soon via UI")
 
         st.markdown("💡 *Check the boxes on the left of the grid to select multiple loads for combining.*")
 
@@ -557,13 +487,56 @@ with tab_board:
             use_container_width=True, height=600, key="editor"
         )
 
-        # Handle Combine Action based on Editor State
-        # Streamlit re-runs on button click, so we read the checked rows from the previous state's data editor.
-        if st.session_state.get('editor') is not None:
-            # We can map edited_df selections to combine logic if we had a dedicated state button.
-            # To strictly mimic the request without complex multi-step Streamlit hacks, we export.
-            pass
-            
+        # Extraction logic
+        selected_ids = edited_df[edited_df["Select"] == True]["BinID"].tolist()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔗 Combine Selected Loads", use_container_width=True, type="primary"):
+                if len(selected_ids) < 2:
+                    st.warning("Please check at least two rows to combine.")
+                else:
+                    target_id = selected_ids[0]
+                    sources = selected_ids[1:]
+                    target_idx = next(i for i, b in enumerate(st.session_state.active_bins) if b["bin_id"] == target_id)
+                    target_bin = st.session_state.active_bins[target_idx]
+                    
+                    for s_id in sources:
+                        s_bin = next(b for b in st.session_state.active_bins if b["bin_id"] == s_id)
+                        target_bin["stores"].extend(s_bin.get("stores", []))
+                        target_bin["pieces"].extend(s_bin.get("pieces", []))
+                        target_bin["cubes"] += s_bin["cubes"]
+                        target_bin["weight"] += s_bin["weight"]
+                        target_bin["pattern_type"] = "MANUAL COMBINE"
+                        st.session_state.active_bins.remove(s_bin)
+                    st.rerun()
+
+        with col2:
+            if st.button("✂️ Pop Out / Uncombine Selected", use_container_width=True):
+                if len(selected_ids) == 0:
+                    st.warning("Check a load to uncombine.")
+                else:
+                    for s_id in selected_ids:
+                        s_idx = next((i for i, b in enumerate(st.session_state.active_bins) if b["bin_id"] == s_id), -1)
+                        if s_idx != -1:
+                            s_bin = st.session_state.active_bins.pop(s_idx)
+                            for piece in reversed(s_bin.get("pieces", [])):
+                                max_c, max_w = get_trailer_limits(piece.get("trailer", "53'"), st.session_state.config_data, allow_banana)
+                                new_bin = {
+                                    "bin_id": str(uuid.uuid4()),
+                                    "stores": [piece.get("raw_id", "")],
+                                    "pieces": [piece],
+                                    "cubes": piece.get("cubes", 0.0),
+                                    "weight": piece.get("weight", 0.0),
+                                    "max_c": max_c,
+                                    "max_w": max_w,
+                                    "trailer": piece.get("trailer", "53'"),
+                                    "pattern_type": "OK (POPPED OUT)"
+                                }
+                                st.session_state.active_bins.insert(s_idx, new_bin)
+                    st.rerun()
+
+        st.markdown("---")
         csv = df.drop(columns=["Select", "BinID"]).to_csv(index=False).encode('utf-8')
         st.download_button("💾 Export Active Plan", data=csv, file_name="dispatch_plan.csv", mime="text/csv")
 
@@ -599,14 +572,10 @@ with tab_perfect:
 
                 is_frozen = commodity_mode.lower() == "frozen"
                 groups = [("PM", "🌙 PM Shift"), ("AM", "🌅 AM Shift")] if is_frozen else [("ALL", "Standard Dispatch")]
-                
                 sim_results = {"groups": {}, "total_trailers": 0}
                 
                 for grp_key, grp_label in groups:
-                    # Filter stores by shift
                     pool = [s for s in st.session_state.baseline_stores.values() if (not is_frozen or s.get("shift") == grp_key)]
-                    
-                    # Split into equipment tiers
                     tiers = {
                         "53'": [s for s in pool if "53" in s.get("trailer", "53'").lower()],
                         "48'": [s for s in pool if "48" in s.get("trailer", "").lower()],
@@ -619,14 +588,12 @@ with tab_perfect:
                     for t_key, t_stores in tiers.items():
                         if not t_stores: continue
                         max_c, max_w = get_trailer_limits(t_key, st.session_state.config_data, allow_banana)
-                        
                         optimized_bins = solve_optimal_bins_aggressive(
                             t_stores, max_c, max_w, st.session_state.historical_rules,
                             commodity=commodity_mode, strategy=strat_mode, random_seed=seed
                         )
                         grp_res[t_key] = optimized_bins
                         sim_results["total_trailers"] += len(optimized_bins)
-                        
                     sim_results["groups"][grp_label] = grp_res
                 
                 st.session_state.simulated_results = sim_results
@@ -641,16 +608,15 @@ with tab_perfect:
                 for grp_data in res["groups"].values():
                     for tier_bins in grp_data.values():
                         for b in tier_bins:
-                            # Re-wrap for the active board schema
                             new_board.append({
                                 "bin_id": str(uuid.uuid4()),
                                 "stores": b["stores"],
-                                "pieces": b["pieces"],
+                                "pieces": b.get("pieces", []),
                                 "cubes": b["cubes"],
                                 "weight": b["weight"],
-                                "max_c": get_trailer_limits(b["pieces"][0].get("trailer", "53'"), st.session_state.config_data, allow_banana)[0],
+                                "max_c": get_trailer_limits(b.get("pieces", [{}])[0].get("trailer", "53'"), st.session_state.config_data, allow_banana)[0],
                                 "max_w": st.session_state.config_data.get("max_weight", 44000.0),
-                                "trailer": b["pieces"][0].get("trailer", "53'"),
+                                "trailer": b.get("pieces", [{}])[0].get("trailer", "53'"),
                                 "pattern_type": b.get("pattern_type", "Optimized")
                             })
                 st.session_state.active_bins = new_board
